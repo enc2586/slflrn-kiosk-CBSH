@@ -7,7 +7,8 @@ Python을 활용하여 이 작업을 대신 해 주는 프로그램을 만들기
 
 책임자: enc2586(고1)
 
-구성원: chh1025(고1), appearedherosheep(고1), 류_현(고1), 도_우(고1) #아직 github id를 전달받지 못한 친구들은 부득이하게 실명 작성
+구성원: chh1025(고1), appearedherosheep(고1), 류_현(고1), 도_우(고1)
+#아직 github id를 전달받지 못한 친구들은 부득이하게 실명 작성
 
 기여자: Nebula(github id 아님)
 
