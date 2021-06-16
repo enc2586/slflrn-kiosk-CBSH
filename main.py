@@ -21,12 +21,8 @@ class uidAlreadyInUseErr(Exception):
         super().__init__("This uid is already in use.")
 
 class idAlreadyInUseErr(Exception):
-    def __init__(self, uid):
-        self.uid = str(uid)
-        super().__init__(f"This id is already in use. (by {self.uid})")
-    
-    def __str__(self):
-        return self.uid
+    def __init__(self):
+        super().__init__(f"This id is already in use.")
 
 with open('./components/key.txt') as f: #암호화 키 로드
     raw_key = f.read()
