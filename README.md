@@ -34,6 +34,10 @@ Python을 활용하여 이 작업을 대신 해 주는 프로그램을 만들기
     - 자습신청 기능 이용 시 로그 남기는 코드 작성
 
   ● chh1025 : 7월 5일 이후 commit예정
+  
   ● appearedherosheep : 7월 5일 이후 commit예정
+  
   ● 류_현 : 7월 5일 이후 commit예정
+  
   ● 도_우 : 7월 5일 이후 commit예정
+  
