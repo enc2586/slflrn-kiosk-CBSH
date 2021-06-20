@@ -36,6 +36,10 @@ class noUidFoundErr(Exception):
     def __init__(self):
         super().__init__("Can't find the uid you requested.")
 
+class periodInvalidErr(Exception):
+    def __init__(self):
+        super().__init__("Period is not valid.")
+
 with open('./components/key.txt') as f: #암호화 키 로드
     raw_key = f.read()
     key = raw_key.encode('utf-8')
@@ -63,7 +67,7 @@ def decrypt(data): #암호문 -> 평문(str)
     res = cry.decrypt(data)
     return res.decode('utf-8')
 
-def tidy(string):
+def tidy(string): #2개 이상의 공백 정리
     str_lst = string.split()
     string = " ".join(str_lst)
 
@@ -117,7 +121,7 @@ def crlusrdata(wid, wpw): #학번, 이름 반환
 
     std_pos = usr_data.find('번')
     name = tidy(usr_data[std_pos+2:std_pos+5])
-    sid = sidchk((''.join(re.findall('\d+', usr_data[:std_pos]))))
+    sid = sidchk(''.join(re.findall('\d+', usr_data[:std_pos])))
     
     data = {
         'name': name,
@@ -126,7 +130,9 @@ def crlusrdata(wid, wpw): #학번, 이름 반환
 
     return data
 
-def register_db(uid, data):
+def register(uid_str, data): #data를 uid에 암호화하여 저장
+    uid = uid_str
+
     uidchk = db.child('users').child(uid).get().val()
 
     if uidchk:
@@ -139,9 +145,12 @@ def register_db(uid, data):
         if data['id'] == comp_id:
             raise idAlreadyInUseErr
 
+    for i in ENCRYT_ITEM:
+        data[i] = encrypt(data[i])
+
     db.child('users').child(uid).child('info').set(data)
 
-def register_man():
+def register_man(): #프로그램 상에서 수동으로 가입
     while True:
         uid = input("uid: ")
 
@@ -193,11 +202,13 @@ def register_man():
 
     print('민감 정보 암호화 후 데이터베이스 등록 시도...', end='')
     
-    register_db(uid, usr_data)
+    register(uid, usr_data)
 
     print(' 성공')
 
-def getusrdata(uid):
+def getusrdata(uid_str): #uid의 데이터를 복호화하여 반환
+    uid = uid_str
+
     usr_info = db.child('users').child(uid).child('info').get().val()
     if not usr_info:
         raise noUidFoundErr
@@ -207,8 +218,22 @@ def getusrdata(uid):
 
     return usr_info
 
-def apply_man():
-    print("hello")
+def log_apply(serial, uid, period, clsrm, ctcr, mode): #신청 접수 로그
+    timenow = datetime.now().strftime("%Y-%m-%d-%a %H:%M:%S")
+    with open('./components/log.txt', "a", encoding='utf-8') as f:
+        f.write("\n" + timenow + " - app-" + mode)
+        f.write("(" + serial + ")[")
+        usr_data = db.child('users').child(uid).child('info').get().val()
+        f.write(str(uid) + usr_data['name'] + "(" + str(usr_data['sid']) + ")-")
+        f.write(str(period) + "교시," + clsrm + "," + ctcr + "]")
+
+def log_cancel(serial, uid, mode): #신청 취소 로그
+    timenow = datetime.now().strftime("%Y-%m-%d-%a %H:%M:%S")
+    with open("./components/log.txt", "a", encoding='utf-8') as f:
+        f.write("\n" + timenow + " - can-" + mode)
+        f.write("(" + serial + ")[")
+        usr_data = db.child('users').child(uid).child('info').get().val()
+        f.write(str(uid) + usr_data['name'] + "(" + str(usr_data['sid']) + ")]")
 
 def apply(uid_str, period, clsrm, ctcr): #자습 등록
 
@@ -230,28 +255,9 @@ def apply(uid_str, period, clsrm, ctcr): #자습 등록
     if not hrmtcr:
         raise hrmtcrInvalidErr
 
-    site_data = getsitedata(usr_info['id'], usr_info['pw'])
-    find_all = site_data.find_all('tr')
-
-    raw_found = []
-
-    for i in find_all:
-        if "교시" in str(i):
-            raw_found.append(i)
-
-    slflrn_periods = []
-
-    for i in raw_found:
-
-        raw_data = str(i)
-        i = i.get_text().replace("\n", "")
-
-        pos1 = i.find('교시')
-        period_str = i[pos1-2:pos1-1]
-
-        slflrn_periods.append(period_str)
+    tdyapp = gettdyapp(uid)
     
-    if not period in slflrn_periods:
+    if not period in tdyapp:
         raise periodInvalidErr
     
     clsrmid = db.child('clsrm').child(clsrm).get().val()
@@ -288,10 +294,243 @@ def apply(uid_str, period, clsrm, ctcr): #자습 등록
         result = json.loads(req.content.decode('utf8'))
 
         if result['result']['success']==True:
+            log_apply(result['slrnNo'], uid, period, clsrm, ctcr, "am")
             return result['slrnNo']
         else:
             raise failedApplyingErr
-        
-print(apply('000000', 4, '합동강의실', '감독교사'))
 
-#today = datetime.now().strftime("%Y%m%d")
+def cancel(uid_str, serial): #자습 신청 취소
+    uid = uid_str
+
+    usr_info = getusrdata(uid)
+
+    login_url = 'http://academic.petapop.com/sign/actionLogin.do'
+    req_url = 'http://academic.petapop.com/self/deleteSelfLrn.do?slrnNo=' + str(serial)
+
+    usr_data = {
+        'id' : usr_info['id'],
+        'password' : usr_info['pw']
+    }
+
+    with requests.session() as sess:
+        #로그인
+        res = sess.post(login_url, data=usr_data)
+        login_data = res.content.decode('utf8')
+        usr_data = tidy(BeautifulSoup(login_data, "html.parser").li.get_text().replace("\n", ""))
+    
+        std_pos = usr_data.find('번')
+        name_crwl = tidy(usr_data[std_pos+2:std_pos+5])
+
+        if(name_crwl != usr_info['name']):
+            raise loginFailErr
+            
+        req = sess.post(req_url)
+        result = json.loads(req.content.decode('utf8'))
+
+        if result['result']['success']==True:
+            log_cancel(serial, uid, 'am')
+            return True
+        else:
+            raise CancelFailErr
+
+def getstat(uid_str): #자습 신청 내용 확인
+    uid = uid_str
+    usr_info = getusrdata(uid)
+
+    site_data = getsitedata(usr_info['id'], usr_info['pw'])
+    find_all = site_data.find_all('tr')
+
+    raw_found = []
+    for i in find_all:
+        if "교시" in str(i):
+            raw_found.append(i)
+            
+    slflrn_found = []
+    for i in raw_found:
+        raw_data = str(i)
+        i = i.get_text().replace("\n", "")
+
+        pos1 = i.find('교시')
+        period = i[pos1-2:pos1-1]
+
+        pos2 = i.find('(')
+        clsrm = i[pos1+2:pos2-1]
+
+        pos1 = raw_data.find('deleteSelfLrn')
+        pos2 = raw_data.find('" title="신청취소"')
+        serial = raw_data[pos1+24:pos2]
+
+        pos = i.find(') 취소')
+        grnt_raw = tidy(i[pos+4:])
+
+        if grnt_raw == '미승인':
+            granted = False
+        elif grnt_raw == '승인':
+            granted = True
+        elif grnt_raw == '교시 신청':
+            continue
+
+        slflrn_found.append({'period': period, 'clsrm': clsrm, 'serial': serial, 'granted': granted})
+
+    return slflrn_found
+
+def gettdyapp(uid_str): #오늘 신청 가능 자습 교시 확인
+    uid = uid_str
+    usr_info = getusrdata(uid)
+
+    site_data = getsitedata(usr_info['id'], usr_info['pw'])
+    find_all = site_data.find_all('tr')
+
+    raw_found = []
+
+    for i in find_all:
+        if "교시" in str(i):
+            raw_found.append(i)
+
+    slflrn_periods = []
+
+    for i in raw_found:
+
+        raw_data = str(i)
+        i = i.get_text().replace("\n", "")
+
+        pos1 = i.find('교시')
+        period_str = i[pos1-2:pos1-1]
+
+        slflrn_periods.append(period_str)
+    
+    return slflrn_periods
+
+def gettcrdata(uid_str, period): #해당 자습 교시 신청 가능 교실, 정원 상태, 교사 확인 
+    uid = uid_str
+    usr_info = getusrdata(uid)
+    
+    if(type(period) == int):
+        period = str(period)
+
+    tdyapp = gettdyapp(uid)
+
+    if not period in tdyapp:
+        raise periodInvalidErr
+
+    login_url = 'http://academic.petapop.com/sign/actionLogin.do'
+    req_url = 'http://academic.petapop.com/self/writeSelfLrnReqst.do?searchSgnId=20210620&searchLrnPd=' + str(period)
+
+    usr_data = {
+        'id' : usr_info['id'],
+        'password' : usr_info['pw']
+    }
+
+    with requests.session() as sess:
+        #로그인
+        res = sess.post(login_url, data=usr_data)
+        login_data = res.content.decode('utf8')
+        usr_data = tidy(BeautifulSoup(login_data, "html.parser").li.get_text().replace("\n", ""))
+
+        std_pos = usr_data.find('번')
+        name_crwl = tidy(usr_data[std_pos+2:std_pos+5])
+
+        if(name_crwl != usr_info['name']):
+            raise loginFailErr
+            
+        req = sess.get(req_url)
+        res = req.content.decode('utf-8')
+
+    site_data = BeautifulSoup(res, 'html.parser')
+
+    tcr = {}
+    for element in site_data.find_all('option'):
+        if element['value']:
+            tcr[element.get_text()] = element['value']
+
+    return tcr
+
+def getclsrmdata(uid_str, period):
+    uid = uid_str
+    usr_info = getusrdata(uid)
+    
+    if(type(period) == int):
+        period = str(period)
+
+    tdyapp = gettdyapp(uid)
+
+    if not period in tdyapp:
+        raise periodInvalidErr
+
+    login_url = 'http://academic.petapop.com/sign/actionLogin.do'
+    req_url = 'http://academic.petapop.com/self/writeSelfLrnReqst.do?searchSgnId=20210620&searchLrnPd=' + str(period)
+
+    usr_data = {
+        'id' : usr_info['id'],
+        'password' : usr_info['pw']
+    }
+
+    with requests.session() as sess:
+        #로그인
+        res = sess.post(login_url, data=usr_data)
+        login_data = res.content.decode('utf8')
+        usr_data = tidy(BeautifulSoup(login_data, "html.parser").li.get_text().replace("\n", ""))
+
+        std_pos = usr_data.find('번')
+        name_crwl = tidy(usr_data[std_pos+2:std_pos+5])
+
+        if(name_crwl != usr_info['name']):
+            raise loginFailErr
+            
+        req = sess.get(req_url)
+        res = req.content.decode('utf-8')
+
+    site_data = BeautifulSoup(res, 'html.parser')
+
+    clsrm_raw = []
+    for element in site_data.find_all('td'):
+        val = tidy(element.get_text())
+
+        if val == '-':
+            continue
+        if not val:
+            continue
+        if val == ' ':
+            continue
+
+        clsrm_raw.append(val)
+    
+    room = 0
+    tcr = 0
+
+    clsrm = {}
+    for i in clsrm_raw:
+        try:
+            temp = int(i)
+        except ValueError:
+            case = i[0:1]
+            try:
+                temp = int(case)
+                std_pos = i.find('(')
+                capa = ''.join(re.findall('\d+', i[:std_pos]))
+                ppl = ''.join(re.findall('\d+', i[std_pos:]))
+                tmpr = {}
+
+                if tcr:
+                    tmpr['tcr'] = tcr
+                    tcr = 0
+                tmpr['capa'] = int(capa)
+                capa = 0
+                tmpr['ppl'] = int(ppl)
+                ppl = 0
+
+                clsrm[room] = tmpr
+                room = 0
+
+            except ValueError:
+                if not room:
+                    room = i
+                    continue
+                tcr = i
+                continue
+
+    return clsrm
+
+clsrmdata = getclsrmdata('000000', 1)
+
+print(clsrmdata)
