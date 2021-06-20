@@ -24,6 +24,18 @@ class idAlreadyInUseErr(Exception):
     def __init__(self):
         super().__init__(f"This id is already in use.")
 
+class hrmtcrInvalidErr(Exception):
+    def __init__(self):
+        super().__init__("Retrieved hrmtcr data is invalid.")
+
+class ApplyingFailErr(Exception):
+     def __init__(self):
+        super().__init__("Login success, but failed to apply.")
+
+class noUidFoundErr(Exception):
+    def __init__(self):
+        super().__init__("Can't find the uid you requested.")
+
 with open('./components/key.txt') as f: #암호화 키 로드
     raw_key = f.read()
     key = raw_key.encode('utf-8')
@@ -99,7 +111,7 @@ def sidchk(sid): #학번 형식 확인, 보정
     
     raise sidInvalidErr
 
-def getusrdata(wid, wpw): #학번, 이름 반환
+def crlusrdata(wid, wpw): #학번, 이름 반환
     site_data = getsitedata(wid, wpw)
     usr_data = tidy(site_data.li.get_text().replace('\n', ''))
 
@@ -125,7 +137,7 @@ def register_db(uid, data):
     for i in idchk:
         comp_id = decrypt(db.child('users').child(i).child('info').child('id').get().val())
         if data['id'] == comp_id:
-            raise idAlreadyInUseErr(i)
+            raise idAlreadyInUseErr
 
     db.child('users').child(uid).child('info').set(data)
 
@@ -153,7 +165,7 @@ def register_man():
         print('첫 로그인 진행...', end='')
 
         try:
-            usr_info = getusrdata(usr_data['id'], usr_data['pw'])
+            usr_info = crlusrdata(usr_data['id'], usr_data['pw'])
         except loginFailErr:
             print('\n해당 id와 pw로 로그인에 실패했습니다. 다시 시도하세요.')
             continue
@@ -185,6 +197,101 @@ def register_man():
 
     print(' 성공')
 
-register_man()
+def getusrdata(uid):
+    usr_info = db.child('users').child(uid).child('info').get().val()
+    if not usr_info:
+        raise noUidFoundErr
+
+    for i in ENCRYT_ITEM:
+        usr_info[i] = decrypt(usr_info[i])
+
+    return usr_info
+
+def apply_man():
+    print("hello")
+
+def apply(uid_str, period, clsrm, ctcr): #자습 등록
+
+    uid = uid_str
+
+    if(type(period) == int):
+        period = str(period)
+
+    usr_info = getusrdata(uid) #정보 복호화
+
+    try: #소속 반 인식
+        usr_class = int(usr_info['sid']) // 100
+        if(usr_class <= 10 or usr_class >= 40):
+            raise sidInvalidErr
+    except ValueError:
+        raise sidInvalidErr
+
+    hrmtcr = db.child('hrmtcr').child(str(usr_class)).get().val() #담임교사 가져옴
+    if not hrmtcr:
+        raise hrmtcrInvalidErr
+
+    site_data = getsitedata(usr_info['id'], usr_info['pw'])
+    find_all = site_data.find_all('tr')
+
+    raw_found = []
+
+    for i in find_all:
+        if "교시" in str(i):
+            raw_found.append(i)
+
+    slflrn_periods = []
+
+    for i in raw_found:
+
+        raw_data = str(i)
+        i = i.get_text().replace("\n", "")
+
+        pos1 = i.find('교시')
+        period_str = i[pos1-2:pos1-1]
+
+        slflrn_periods.append(period_str)
+    
+    if not period in slflrn_periods:
+        raise periodInvalidErr
+    
+    clsrmid = db.child('clsrm').child(clsrm).get().val()
+    hrmtcrid = db.child('tcr').child(hrmtcr).get().val()
+    ctcrid = db.child('tcr').child(ctcr).get().val()
+
+    form_data = {
+        'clssrmId':clsrmid, #장소
+        'roomTcherId':hrmtcrid, #담임교사(homeRoomTeahcer)
+        'cchTcherId':ctcrid #지도교사(RequestedRoomTeacher)
+    }
+
+    login_url = 'http://academic.petapop.com/sign/actionLogin.do'
+    req_url = 'http://academic.petapop.com/self/requestSelfLrn.do?sgnId=' + datetime.now().strftime("%Y%m%d") + '&lrnPd=' + period
+
+    usr_data = {
+        'id': usr_info['id'],
+        'password': usr_info['pw']
+    }
+
+    with requests.session() as sess:
+        #로그인
+        res = sess.post(login_url, data=usr_data)
+        login_data = res.content.decode('utf8')
+        usr_data = tidy(BeautifulSoup(login_data, "html.parser").li.get_text().replace("\n", ""))
+    
+        std_pos = usr_data.find('번')
+        name_crwl = tidy(usr_data[std_pos+2:std_pos+5])
+
+        if(name_crwl != usr_info['name']):
+            raise loginFailErr
+
+        req = sess.post(req_url, data=form_data)
+        result = json.loads(req.content.decode('utf8'))
+
+        if result['result']['success']==True:
+            return result['slrnNo']
+        else:
+            raise failedApplyingErr
+        
+print(apply('000000', 4, '합동강의실', '감독교사'))
 
 #today = datetime.now().strftime("%Y%m%d")
