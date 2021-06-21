@@ -482,55 +482,60 @@ def getclsrmdata(uid_str, period):
 
     site_data = BeautifulSoup(res, 'html.parser')
 
-    clsrm_raw = []
-    for element in site_data.find_all('td'):
-        val = tidy(element.get_text())
-
-        if val == '-':
-            continue
-        if not val:
-            continue
-        if val == ' ':
-            continue
-
-        clsrm_raw.append(val)
-    
-    room = 0
-    tcr = 0
-
     clsrm = {}
-    for i in clsrm_raw:
-        try:
-            temp = int(i)
-        except ValueError:
-            case = i[0:1]
-            try:
-                temp = int(case)
-                std_pos = i.find('(')
-                capa = ''.join(re.findall('\d+', i[:std_pos]))
-                ppl = ''.join(re.findall('\d+', i[std_pos:]))
-                tmpr = {}
 
-                if tcr:
-                    tmpr['tcr'] = tcr
-                    tcr = 0
-                tmpr['capa'] = int(capa)
-                capa = 0
-                tmpr['ppl'] = int(ppl)
-                ppl = 0
-
-                clsrm[room] = tmpr
-                room = 0
-
-            except ValueError:
-                if not room:
-                    room = i
-                    continue
-                tcr = i
+    for element in site_data.find_all('tr'): #하나의 tr 가져와서(이름, id, 정원)
+        clsrm_name = 0 #변수들 초기화
+        clsrm_tcr = 0
+        clsrm_id = 0
+        clsrm_max = 0
+        clsrm_ppl = 0
+        for td in element.find_all('td'): #그 속의 td요소 분석
+            ttd = tidy(str(td.get_text())) #내용 정리
+            if ttd == '-': #쓸모없는 케이스1
                 continue
+
+            elif not ttd: #내용이 비었으면 id긁어오기
+                clsrm_id = td.find('div').find('input')['value']
+                continue
+
+            elif ttd.isdigit(): #숫자로만 이루어졌으면 continue
+                continue
+
+            elif '(' in ttd and ttd[0:1].isdigit(): #정원 관련 내용이면
+                std_pos = ttd.find('(')
+                clsrm_max = ''.join(re.findall('\d+', ttd[:std_pos]))
+                clsrm_ppl = ''.join(re.findall('\d+', ttd[std_pos:]))
+
+            else:
+                if not clsrm_name:
+                    clsrm_name = ttd
+                    continue
+                clsrm_tcr = ttd
+                continue
+        
+        #하나의 tr 분석 완료, 해당 내용을 dictionary에 저장
+        if (str(clsrm_id)[0:7] != 'CLSSRM_'):
+            continue
+
+        temp = {
+            'id' : clsrm_id,
+            'max' : clsrm_max,
+            'ppl' : clsrm_ppl
+        }
+
+        if clsrm_tcr:
+            temp['tcr'] = clsrm_tcr
+
+        clsrm[clsrm_name] = temp
+
+        clsrm_tcr = 0
+        clsrm_name = 0
+
+    for i in clsrm:
+        print(i,":",clsrm[i]['id'])
 
     return clsrm
 
-clsrmdata = getclsrmdata('000000', 1)
-
-print(clsrmdata)
+    
+getclsrmdata('000000', 1)
