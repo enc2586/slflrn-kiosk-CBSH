@@ -445,7 +445,7 @@ def gettcrdata(uid_str, period): #해당 자습 교시 신청 가능 교실, 정
 
     return tcr
 
-def getclsrmdata(uid_str, period):
+def getclsrmdata(uid_str, period, department):
     uid = uid_str
     usr_info = getusrdata(uid)
     
@@ -458,7 +458,11 @@ def getclsrmdata(uid_str, period):
         raise periodInvalidErr
 
     login_url = 'http://academic.petapop.com/sign/actionLogin.do'
-    req_url = 'http://academic.petapop.com/self/writeSelfLrnReqst.do?searchSgnId=20210620&searchLrnPd=' + str(period)
+    req_url = {
+        'md' : 'http://academic.petapop.com/clssrm/buldDrw.do?buldId=BUILD_0001&searchSgnId=20210621&searchLrnPd=' + str(period),
+        'cd' : 'http://academic.petapop.com/clssrm/buldDrw.do?buldId=BUILD_0002&searchSgnId=20210621&searchLrnPd=' + str(period),
+        'ed' : 'http://academic.petapop.com/clssrm/buldDrw.do?buldId=BUILD_0005&searchSgnId=20210621&searchLrnPd=' + str(period)
+    }
 
     usr_data = {
         'id' : usr_info['id'],
@@ -477,7 +481,7 @@ def getclsrmdata(uid_str, period):
         if(name_crwl != usr_info['name']):
             raise loginFailErr
             
-        req = sess.get(req_url)
+        req = sess.get(req_url[department])
         res = req.content.decode('utf-8')
 
     site_data = BeautifulSoup(res, 'html.parser')
@@ -515,7 +519,7 @@ def getclsrmdata(uid_str, period):
                 continue
         
         #하나의 tr 분석 완료, 해당 내용을 dictionary에 저장
-        if (str(clsrm_id)[0:7] != 'CLSSRM_'):
+        if (str(clsrm_id)[0:7] != 'CLSSRM_' or '삭제' in str(clsrm_name)):
             continue
 
         temp = {
@@ -532,10 +536,10 @@ def getclsrmdata(uid_str, period):
         clsrm_tcr = 0
         clsrm_name = 0
 
-    for i in clsrm:
-        print(i,":",clsrm[i]['id'])
-
     return clsrm
 
     
-getclsrmdata('000000', 1)
+data = getclsrmdata('000000', 1, 'md')
+
+for i in data:
+    print(i, ":", data[i]['id'] , data[i]['ppl'], data[i]['max'])
