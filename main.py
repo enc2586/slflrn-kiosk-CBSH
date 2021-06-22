@@ -12,6 +12,10 @@ class loginFailErr(Exception):
     def __init__(self):
         super().__init__("Login attempt failed.")
 
+class cancelFailErr(Exception):
+    def __init__(self):
+        super().__init__("Cancel attempt failed.")
+
 class sidInvalidErr(Exception):
     def __init__(self):
         super().__init__("sid is invalid.")
@@ -40,6 +44,10 @@ class periodInvalidErr(Exception):
     def __init__(self):
         super().__init__("Period is not valid.")
 
+class serialInvalidErr(Exception):
+    def __init__(self):
+        super().__init__("Serial code is not valid.")
+
 with open('./components/key.txt') as f: #암호화 키 로드
     raw_key = f.read()
     key = raw_key.encode('utf-8')
@@ -50,7 +58,18 @@ with open('./components/auth.json') as f: #파이썬 인증 키 로드
     firebase = pyrebase.initialize_app(config)
     db = firebase.database()
 
-ENCRYT_ITEM = ['id', 'pw'] #암호화 처리할 것들    
+def initialize():
+    ENCRYT_ITEM = ['id', 'pw'] #암호화 처리할 것들
+    test_uid = '000000'
+
+    clsrmlst = {}
+    clsrmlst_legacy = {}
+    for i in ['md', 'cd', 'ed']:
+        clsrmlst_legacy[i] = getclsrmdata(test_uid, 1, i)
+        for j in clsrmlst_legacy[i]:
+            clsrmlst[j] = clsrmlst_legacy[i][j]
+
+    tcrlst = gettcrdata(test_uid)
 
 def encrypt(data): #평문 -> 암호문(str)
     if type(data) != bytes:
@@ -149,6 +168,7 @@ def register(uid_str, data): #data를 uid에 암호화하여 저장
         data[i] = encrypt(data[i])
 
     db.child('users').child(uid).child('info').set(data)
+#id, name, pw, sid, ud
 
 def register_man(): #프로그램 상에서 수동으로 가입
     while True:
@@ -251,18 +271,14 @@ def apply(uid_str, period, clsrm, ctcr): #자습 등록
     except ValueError:
         raise sidInvalidErr
 
-    hrmtcr = db.child('hrmtcr').child(str(usr_class)).get().val() #담임교사 가져옴
-    if not hrmtcr:
-        raise hrmtcrInvalidErr
-
     tdyapp = gettdyapp(uid)
     
     if not period in tdyapp:
         raise periodInvalidErr
-    
-    clsrmid = db.child('clsrm').child(clsrm).get().val()
-    hrmtcrid = db.child('tcr').child(hrmtcr).get().val()
-    ctcrid = db.child('tcr').child(ctcr).get().val()
+
+    clsrmid = clsrmlst[clsrm]['id']
+    hrmtcrid = tcrlst[clsrmlst[(str(usr_class//10) + '-' + str(usr_class%10) + ' 교실')]['tcr']]
+    ctcrid = tcrlst[ctcr]
 
     form_data = {
         'clssrmId':clsrmid, #장소
@@ -302,6 +318,12 @@ def apply(uid_str, period, clsrm, ctcr): #자습 등록
 def cancel(uid_str, serial): #자습 신청 취소
     uid = uid_str
 
+    if type(serial) == int:
+        try:
+            serial = str(serial)
+        except ValueError:
+            raise serialInvalidErr
+
     usr_info = getusrdata(uid)
 
     login_url = 'http://academic.petapop.com/sign/actionLogin.do'
@@ -331,7 +353,7 @@ def cancel(uid_str, serial): #자습 신청 취소
             log_cancel(serial, uid, 'am')
             return True
         else:
-            raise CancelFailErr
+            raise cancelFailErr
 
 def getstat(uid_str): #자습 신청 내용 확인
     uid = uid_str
@@ -345,7 +367,7 @@ def getstat(uid_str): #자습 신청 내용 확인
         if "교시" in str(i):
             raw_found.append(i)
             
-    slflrn_found = []
+    slflrn_found = {}
     for i in raw_found:
         raw_data = str(i)
         i = i.get_text().replace("\n", "")
@@ -367,10 +389,10 @@ def getstat(uid_str): #자습 신청 내용 확인
             granted = False
         elif grnt_raw == '승인':
             granted = True
-        elif grnt_raw == '교시 신청':
+        else:
             continue
 
-        slflrn_found.append({'period': period, 'clsrm': clsrm, 'serial': serial, 'granted': granted})
+        slflrn_found[period] = {'clsrm': clsrm, 'serial': serial, 'granted': granted}
 
     return slflrn_found
 
@@ -401,20 +423,14 @@ def gettdyapp(uid_str): #오늘 신청 가능 자습 교시 확인
     
     return slflrn_periods
 
-def gettcrdata(uid_str, period): #해당 자습 교시 신청 가능 교실, 정원 상태, 교사 확인 
+def gettcrdata(uid_str): #해당 자습 교시 신청 가능 교실, 정원 상태, 교사 확인 
     uid = uid_str
     usr_info = getusrdata(uid)
-    
-    if(type(period) == int):
-        period = str(period)
 
     tdyapp = gettdyapp(uid)
 
-    if not period in tdyapp:
-        raise periodInvalidErr
-
     login_url = 'http://academic.petapop.com/sign/actionLogin.do'
-    req_url = 'http://academic.petapop.com/self/writeSelfLrnReqst.do?searchSgnId=20210620&searchLrnPd=' + str(period)
+    req_url = 'http://academic.petapop.com/self/writeSelfLrnReqst.do?searchSgnId=20210620&searchLrnPd=1'
 
     usr_data = {
         'id' : usr_info['id'],
@@ -443,9 +459,11 @@ def gettcrdata(uid_str, period): #해당 자습 교시 신청 가능 교실, 정
         if element['value']:
             tcr[element.get_text()] = element['value']
 
+    tcr['지도교사없음'] = ''
+
     return tcr
 
-def getclsrmdata(uid_str, period, department):
+def getclsrmdata(uid_str, period, department): #해당 시간, 건물의 교실 현황 확인
     uid = uid_str
     usr_info = getusrdata(uid)
     
@@ -538,8 +556,5 @@ def getclsrmdata(uid_str, period, department):
 
     return clsrm
 
-    
-data = getclsrmdata('000000', 1, 'md')
-
-for i in data:
-    print(i, ":", data[i]['id'] , data[i]['ppl'], data[i]['max'])
+initialize()
+##이 아래부터 실행 구역
